@@ -77,8 +77,19 @@
   .msg.ok { color:#16a34a; } .msg.err { color:#dc2626; }
   @media(max-width:900px){ .tool{ grid-template-columns:1fr; } }
   @media print {
-    body{ background:#fff; } .site-header,.site-footer,.hero,.card,.tool-actions,.msg,.ad-slot,.tool>.card{ display:none!important; }
-    .tool{ display:block; } #invoice{ box-shadow:none; border-radius:0; padding:0; }
+    @page { margin: 12mm; }
+    body { background:#fff !important; }
+    /* Hide everything, then reveal only the invoice */
+    body * { visibility: hidden !important; }
+    #invoice, #invoice * { visibility: visible !important; }
+    #invoice {
+      position: absolute; left: 0; top: 0; width: 100%;
+      box-shadow: none !important; border-radius: 0 !important; padding: 0 !important;
+      -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+    }
+    #invoice table.preview th, #invoice .totals .grand {
+      -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+    }
   }
 </style>
 </head>
@@ -175,6 +186,7 @@
       <div class="tool-actions">
         <button class="btn" id="pdfBtn" type="button">⬇ Download PDF</button>
         <button class="btn sec" type="button" id="printBtn">🖨 Print</button>
+        <button class="btn sec" type="button" id="sampleBtn">📋 Load Sample</button>
         <button class="btn sec" type="button" id="resetBtn">↺ Reset</button>
       </div>
       <div id="msg" class="msg" role="status" aria-live="polite"></div>
@@ -374,7 +386,7 @@ $('logo').addEventListener('change',e=>{
 });
 
 function exportPDF(){
-  if(!window.jspdf || !window.jspdf.jsPDF){
+  if(!window.jspdf || !window.jspdf.jsPDF || typeof html2canvas === 'undefined'){
     showMsg('PDF library failed to load. Please check your internet connection, or use Print → Save as PDF.',false);
     return;
   }
@@ -388,35 +400,80 @@ function exportPDF(){
 
   const { jsPDF } = window.jspdf;
   const node = $('invoice');
-  const pdf = new jsPDF({orientation:'p', unit:'pt', format:'a4', compress:true});
-  const pageW = pdf.internal.pageSize.getWidth();
-  const margin = 24;
 
-  try{
-    pdf.html(node, {
-      callback: function(doc){
-        doc.save(($('invNo').value||'invoice')+'.pdf');
-        showMsg('Your PDF has been downloaded ✓',true);
-        btn.disabled=false; btn.textContent=old;
-      },
-      x: margin,
-      y: margin,
-      width: pageW - margin*2,
-      windowWidth: node.scrollWidth,
-      html2canvas: { scale: 2, useCORS:true, backgroundColor:'#ffffff', logging:false },
-      autoPaging: 'text'
-    });
-  }catch(err){
+  // Capture the whole invoice as a high-resolution image, then scale it to
+  // fit the full A4 page width so NOTHING on the right side gets cut off.
+  html2canvas(node, {
+    scale: 2,
+    useCORS: true,
+    backgroundColor: '#ffffff',
+    logging: false,
+    windowWidth: node.scrollWidth,
+    scrollX: 0,
+    scrollY: 0
+  }).then(function(canvas){
+    const pdf = new jsPDF({orientation:'p', unit:'mm', format:'a4', compress:true});
+    const pageW = pdf.internal.pageSize.getWidth();   // 210 mm
+    const pageH = pdf.internal.pageSize.getHeight();  // 297 mm
+    const imgW = pageW;                               // fit full width
+    const imgH = canvas.height * imgW / canvas.width; // proportional height
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+    // First page
+    let position = 0;
+    let heightLeft = imgH;
+    pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
+    heightLeft -= pageH;
+
+    // Add extra pages if the invoice is taller than one page
+    while(heightLeft > 0){
+      position -= pageH;
+      pdf.addPage();
+      pdf.addImage(imgData, 'JPEG', 0, position, imgW, imgH);
+      heightLeft -= pageH;
+    }
+
+    pdf.save(($('invNo').value || 'invoice') + '.pdf');
+    showMsg('Your PDF has been downloaded ✓',true);
+    btn.disabled=false; btn.textContent=old;
+  }).catch(function(err){
     console.error(err);
     showMsg('PDF error: '+err.message+' — Please use Print → Save as PDF instead.',false);
     btn.disabled=false; btn.textContent=old;
-  }
+  });
+}
+
+function loadSample(){
+  const hasData = [...$('itemRows').querySelectorAll('.d')].some(i=>i.value.trim()) ||
+                  $('fromName').value.trim() || $('toDetails').value.trim();
+  if(hasData && !confirm('Load sample data? This will replace your current invoice.')) return;
+
+  $('fromName').value   = 'Acme Studio';
+  $('fromDetails').value= 'Acme Studio Pvt Ltd\n221B Market Road, Mumbai 400001\nbilling@acmestudio.com\nGSTIN: 27AAAAA0000A1Z5';
+  $('toDetails').value  = 'John Carter\nCarter & Co.\n12 Hill Street, Pune 411001\njohn@carterco.com';
+  $('invNo').value      = 'INV-' + new Date().getFullYear() + '-007';
+  $('issueDate').value  = new Date().toISOString().slice(0,10);
+  const due = new Date(); due.setDate(due.getDate()+15);
+  $('dueDate').value    = due.toISOString().slice(0,10);
+  $('currency').value   = '₹';
+  $('tax').value        = 18;
+  $('discount').value   = 5;
+  $('discType').value   = '%';
+  $('notes').value      = 'Payment due within 15 days via bank transfer. Thank you for your business!';
+
+  $('itemRows').innerHTML = '';
+  addItem('Website design (5 pages)', 1, 25000);
+  addItem('Logo & brand identity', 1, 8000);
+  addItem('Hosting setup & configuration', 2, 1500);
+  render();
+  showMsg('Sample invoice loaded ✓',true);
 }
 
 // Wire up buttons (no inline handlers)
 $('addItemBtn').addEventListener('click',()=>addItem());
 $('pdfBtn').addEventListener('click',exportPDF);
 $('printBtn').addEventListener('click',()=>window.print());
+$('sampleBtn').addEventListener('click',loadSample);
 $('resetBtn').addEventListener('click',resetAll);
 
 ['fromName','fromDetails','toDetails','invNo','issueDate','dueDate','currency','tax','discount','discType','notes']
