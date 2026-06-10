@@ -2,7 +2,7 @@
 
 A free, browser-based invoice generator for freelancers and small businesses. Fill in your details, add line items, apply tax and discounts, and download a clean, print-ready PDF — no sign-up, no software, 100% in your browser.
 
-**Live site:** https://mohdabdullah46345-ops.github.io/Invoice-Builder-/
+**Live site:** https://quicktoolkit1.github.io/Invoice-Builder-/
 
 ---
 
